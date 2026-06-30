@@ -1,0 +1,594 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    
+    <!-- ================= PWA APP 核心配置區 (您要的代碼在這裡) ================= -->
+    <link rel="manifest" href="manifest.json">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="theme-color" content="#000000">
+    <link rel="apple-touch-icon" href="https://cdn-icons-png.flaticon.com/512/3203/3203071.png">
+    <script>
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', function() {
+                navigator.serviceWorker.register('sw.js').then(function(registration) {
+                    console.log('APP 背景服務註冊成功');
+                }, function(err) {
+                    console.log('APP 背景服務註冊失敗: ', err);
+                });
+            });
+        }
+    </script>
+    <!-- ================= PWA 配置結束 ================= -->
+
+    <title>DASEINPRESENT 隨筆排版</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+TC:wght@400;700&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/heic2any@0.0.4/dist/heic2any.min.js"></script>
+    
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: #000; 
+            margin: 0;
+            padding: 0;
+            overscroll-behavior: none; 
+            width: 100vw;
+            height: 100vh;
+            height: 100dvh; 
+            overflow: hidden;
+        }
+        
+        canvas { display: none; }
+        
+        .img-container {
+            position: relative;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+        }
+
+        #previewImage {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            object-fit: contain; 
+            transition: opacity 0.3s ease;
+        }
+
+        .overlay {
+            display: none;
+            position: absolute;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.85);
+            z-index: 50;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            color: white;
+        }
+
+        .loader {
+            border: 4px solid #333;
+            border-top: 4px solid #3b82f6;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+
+        .custom-scroll::-webkit-scrollbar { width: 5px; }
+        .custom-scroll::-webkit-scrollbar-track { background: #f8fafc; }
+        .custom-scroll::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+        
+        input[type=range] { accent-color: #3b82f6; }
+    </style>
+</head>
+<body class="flex flex-col">
+
+    <!-- 全螢幕儲存專用彈出層 -->
+    <div id="resultModal" class="fixed inset-0 bg-black/95 z-[9999] hidden flex-col items-center justify-center p-4">
+        <div class="text-white text-center mb-4">
+            <h2 class="font-bold text-xl text-green-400 mb-1">✨ 高清大圖已生成</h2>
+            <p class="text-xs text-gray-400">點擊下方按鈕儲存，或直接長按圖片</p>
+        </div>
+        
+        <img id="finalHdImage" class="max-w-full max-h-[60vh] object-contain rounded-lg shadow-2xl pointer-events-auto mb-6" style="-webkit-touch-callout: default;">
+        
+        <div class="flex flex-col space-y-3 w-full max-w-xs">
+            <button id="btnNativeShare" class="bg-blue-600 hover:bg-blue-500 text-white px-6 py-3.5 rounded-xl font-bold shadow-lg flex items-center justify-center text-base active:scale-95 transition-transform">
+                <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
+                📥 儲存 / 分享圖片
+            </button>
+            
+            <button id="btnCloseModal" class="bg-gray-800 hover:bg-gray-700 text-gray-300 px-6 py-3 rounded-xl font-medium border border-gray-600 active:scale-95 transition-transform text-sm">
+                ← 返回繼續編輯
+            </button>
+        </div>
+    </div>
+
+    <!-- 上半部：預覽與下載區 -->
+    <div class="w-full h-[45%] bg-[#111] flex flex-col relative flex-shrink-0 border-b border-gray-800">
+        <div class="flex-grow img-container bg-[url('data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyMCIgaGVpZ2h0PSIyMCI+CjxyZWN0IHdpZHRoPSIyMCIgaGVpZ2h0PSIyMCIgZmlsbD0iIzE1MTUxNSIvPgo8cmVjdCB3aWR0aD0iMTAiIGhlaWdodD0iMTAiIGZpbGw9IiMxYTFhMWEiLz4KPHJlY3QgeD0iMTAiIHk9IjEwIiB3aWR0aD0iMTAiIGhlaWdodD0iMTAiIGZpbGw9IiMxYTFhMWEiLz4KPC9zdmc+')]">
+            
+            <div id="loadingOverlay" class="overlay">
+                <div class="loader mb-3"></div>
+                <p id="loadingText" class="text-sm font-medium tracking-wider text-white">處理中...</p>
+            </div>
+
+            <div id="emptyState" class="absolute inset-0 flex flex-col items-center justify-center text-gray-500 pointer-events-none">
+                <svg class="w-12 h-12 mb-2 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg>
+                <p class="text-sm">請從下方選擇照片</p>
+            </div>
+            
+            <canvas id="posterCanvas"></canvas>
+            <img id="previewImage" alt="預覽圖" style="pointer-events: auto; -webkit-touch-callout: default;" />
+        </div>
+
+        <div class="h-14 bg-gray-900 flex justify-between items-center px-4 flex-shrink-0">
+            <div class="flex items-center">
+                <span id="statusBadge" class="px-2 py-1 bg-yellow-500 text-black text-xs font-bold rounded-md">流暢預覽中</span>
+            </div>
+            <button id="btnDownload" class="bg-blue-600 hover:bg-blue-500 text-white px-5 py-2 rounded-lg text-sm font-bold shadow-lg transition-transform transform active:scale-95 flex items-center" disabled>
+                <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
+                渲染大圖
+            </button>
+        </div>
+    </div>
+
+    <!-- 下半部：控制面板區 -->
+    <div class="w-full h-[55%] bg-gray-100 overflow-y-auto custom-scroll pb-10">
+        
+        <div class="p-4 space-y-5 max-w-2xl mx-auto">
+            <!-- 1. 上傳照片 -->
+            <div class="bg-white p-4 rounded-xl shadow-sm border border-gray-200">
+                <label class="block text-sm font-bold text-gray-800 mb-2">1. 上傳背景照片</label>
+                <label for="imageUpload" class="cursor-pointer flex flex-col justify-center items-center px-4 py-4 bg-blue-50 border-2 border-blue-200 border-dashed rounded-xl hover:bg-blue-100 transition-all">
+                    <svg class="w-7 h-7 text-blue-500 mb-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"></path></svg>
+                    <span class="text-sm text-gray-700 font-medium text-center" id="fileNameHtml">點擊選擇照片<br><span class="text-xs text-gray-400 font-normal mt-1 block">支援 JPG / PNG / HEIC</span></span>
+                    <input id="imageUpload" type="file" accept="image/*, .heic, .heif" class="sr-only">
+                </label>
+            </div>
+
+            <!-- 2. 文案庫 (超過 30+ 城市與主題) -->
+            <div class="bg-white p-4 rounded-xl shadow-sm border border-gray-200">
+                <label class="block text-sm font-bold text-gray-800 mb-2">2. 選擇城市靈感</label>
+                <select id="templateSelect" class="block w-full px-3 py-2.5 text-sm border-gray-300 bg-gray-50 rounded-lg focus:ring-blue-500 outline-none"></select>
+            </div>
+
+            <!-- 3. 文字編輯區 -->
+            <div class="bg-white p-4 rounded-xl shadow-sm border border-gray-200">
+                <label class="block text-sm font-bold text-gray-800 mb-3">✍️ 3. 自定義編輯</label>
+                <div class="space-y-4">
+                    <div>
+                        <span class="text-xs text-gray-500 mb-1 block">錯落主標題 (5個字詞)</span>
+                        <div class="grid grid-cols-5 gap-1">
+                            <input type="text" id="w0" class="w-full text-center text-sm p-2 border border-gray-200 bg-gray-50 rounded">
+                            <input type="text" id="w1" class="w-full text-center text-sm p-2 border border-gray-200 bg-gray-50 rounded">
+                            <input type="text" id="w2" class="w-full text-center text-sm p-2 border border-gray-200 bg-gray-50 rounded">
+                            <input type="text" id="w3" class="w-full text-center text-sm p-2 border border-gray-200 bg-gray-50 rounded">
+                            <input type="text" id="w4" class="w-full text-center text-sm p-2 border border-gray-200 bg-gray-50 rounded">
+                        </div>
+                    </div>
+                    <div>
+                        <span class="text-xs text-gray-500 mb-1 block">英文副標 (2行)</span>
+                        <div class="grid grid-cols-2 gap-2">
+                            <input type="text" id="e0" class="w-full text-sm p-2 border border-gray-200 bg-gray-50 rounded">
+                            <input type="text" id="e1" class="w-full text-sm p-2 border border-gray-200 bg-gray-50 rounded">
+                        </div>
+                    </div>
+                    <div>
+                        <span class="text-xs text-gray-500 mb-1 block">左下角詩句/引言 (2行)</span>
+                        <div class="space-y-2">
+                            <input type="text" id="q0" class="w-full text-sm p-2 border border-gray-200 bg-gray-50 rounded">
+                            <input type="text" id="q1" class="w-full text-sm p-2 border border-gray-200 bg-gray-50 rounded">
+                        </div>
+                    </div>
+                    <div>
+                        <span class="text-xs text-gray-500 mb-1 block">底部專屬浮水印</span>
+                        <input type="text" id="watermark" value="DASEINPRESENT" class="w-full text-center text-sm p-2 border border-gray-200 bg-gray-50 rounded uppercase font-bold text-blue-900">
+                    </div>
+                </div>
+            </div>
+
+            <!-- 4. 排版微調區 (中英文獨立控制) -->
+            <div class="bg-blue-50 p-4 rounded-xl shadow-sm border border-blue-100">
+                <label class="block text-sm font-bold text-gray-800 mb-4 text-blue-900">🎛️ 4. 排版微調 (上方即時預覽)</label>
+                
+                <div class="space-y-5">
+                    <div>
+                        <div class="flex justify-between text-xs text-blue-800 font-medium mb-1"><span>字體整體大小</span><span id="val_size">100%</span></div>
+                        <input type="range" id="sl_size" min="50" max="150" value="100" class="w-full">
+                    </div>
+                    
+                    <!-- 錯落主標題控制 -->
+                    <div class="grid grid-cols-2 gap-5 border-t border-blue-200 pt-3">
+                        <div>
+                            <div class="flex justify-between text-xs text-blue-800 font-medium mb-1"><span>主標題上下</span><span id="val_t_y">15%</span></div>
+                            <input type="range" id="sl_t_y" min="2" max="80" value="15" class="w-full">
+                        </div>
+                        <div>
+                            <div class="flex justify-between text-xs text-blue-800 font-medium mb-1"><span>主標題左右</span><span id="val_t_x">10%</span></div>
+                            <input type="range" id="sl_t_x" min="0" max="50" value="10" class="w-full">
+                        </div>
+                    </div>
+
+                    <!-- 英文副標獨立控制 -->
+                    <div class="grid grid-cols-2 gap-5 border-t border-blue-200 pt-3">
+                        <div>
+                            <div class="flex justify-between text-xs text-blue-800 font-medium mb-1"><span>英文副標上下</span><span id="val_e_y">31%</span></div>
+                            <input type="range" id="sl_e_y" min="2" max="95" value="31" class="w-full">
+                        </div>
+                        <div>
+                            <div class="flex justify-between text-xs text-blue-800 font-medium mb-1"><span>英文副標左右</span><span id="val_e_x">10%</span></div>
+                            <input type="range" id="sl_e_x" min="0" max="80" value="10" class="w-full">
+                        </div>
+                    </div>
+
+                    <!-- 詩句引言控制 -->
+                    <div class="grid grid-cols-2 gap-5 border-t border-blue-200 pt-3">
+                        <div>
+                            <div class="flex justify-between text-xs text-blue-800 font-medium mb-1"><span>引言上下</span><span id="val_q_y">78%</span></div>
+                            <input type="range" id="sl_q_y" min="20" max="95" value="78" class="w-full">
+                        </div>
+                        <div>
+                            <div class="flex justify-between text-xs text-blue-800 font-medium mb-1"><span>引言左右</span><span id="val_q_x">10%</span></div>
+                            <input type="range" id="sl_q_x" min="0" max="80" value="10" class="w-full">
+                        </div>
+                    </div>
+
+                    <!-- 透明度控制 -->
+                    <div class="grid grid-cols-2 gap-5 border-t border-blue-200 pt-3 mt-2">
+                        <div>
+                            <div class="flex justify-between text-xs text-blue-800 font-medium mb-1"><span>主文字透明度</span><span id="val_op_main">90%</span></div>
+                            <input type="range" id="sl_op_main" min="10" max="100" value="90" class="w-full">
+                        </div>
+                        <div>
+                            <div class="flex justify-between text-xs text-blue-800 font-medium mb-1"><span>浮水印透明度</span><span id="val_op_wm">60%</span></div>
+                            <input type="range" id="sl_op_wm" min="0" max="100" value="60" class="w-full">
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <p class="text-center text-xs text-gray-400 pt-2">調整完畢後，點擊上方藍色按鈕渲染大圖</p>
+        </div>
+    </div>
+
+    <script>
+        const imageUpload = document.getElementById('imageUpload');
+        const templateSelect = document.getElementById('templateSelect');
+        const canvas = document.getElementById('posterCanvas');
+        const previewImage = document.getElementById('previewImage');
+        const ctx = canvas.getContext('2d');
+        const fileNameDisplay = document.getElementById('fileNameHtml');
+        const emptyState = document.getElementById('emptyState');
+        const loadingOverlay = document.getElementById('loadingOverlay');
+        const loadingText = document.getElementById('loadingText');
+        const btnDownload = document.getElementById('btnDownload');
+        const statusBadge = document.getElementById('statusBadge');
+        
+        const resultModal = document.getElementById('resultModal');
+        const finalHdImage = document.getElementById('finalHdImage');
+        const btnCloseModal = document.getElementById('btnCloseModal');
+        const btnNativeShare = document.getElementById('btnNativeShare');
+
+        const inputs = {
+            w: [document.getElementById('w0'), document.getElementById('w1'), document.getElementById('w2'), document.getElementById('w3'), document.getElementById('w4')],
+            e: [document.getElementById('e0'), document.getElementById('e1')],
+            q: [document.getElementById('q0'), document.getElementById('q1')],
+            wm: document.getElementById('watermark')
+        };
+
+        const sliders = {
+            size: { el: document.getElementById('sl_size'), val: document.getElementById('val_size') },
+            t_y: { el: document.getElementById('sl_t_y'), val: document.getElementById('val_t_y') },
+            t_x: { el: document.getElementById('sl_t_x'), val: document.getElementById('val_t_x') },
+            e_y: { el: document.getElementById('sl_e_y'), val: document.getElementById('val_e_y') }, 
+            e_x: { el: document.getElementById('sl_e_x'), val: document.getElementById('val_e_x') }, 
+            q_y: { el: document.getElementById('sl_q_y'), val: document.getElementById('val_q_y') },
+            q_x: { el: document.getElementById('sl_q_x'), val: document.getElementById('val_q_x') },
+            op_main: { el: document.getElementById('sl_op_main'), val: document.getElementById('val_op_main') },
+            op_wm: { el: document.getElementById('sl_op_wm'), val: document.getElementById('val_op_wm') }
+        };
+
+        let currentImage = null;
+        let hdBlobUrl = null; 
+
+        // 全國熱點城市與香港全系列文案庫
+        const textOptions = [
+            // 經典
+            { name: "【經典】你比夏天更夏天", w: ['你', '比', '夏天', '更', '夏天'], e: ['You are', 'summer'], q: ['“ 六月，你和夏天來了，', '大雨如注 ”'] },
+
+            // 香港系列 (完整回歸)
+            { name: "【香港】你比繁華更永恆 (地標)", w: ['你', '比', '繁華', '更', '永恆'], e: ['You are', 'eternal prosperity.'], q: ['“ 在繁華與海之間，我讀你。”', ''] },
+            { name: "【香港】你比晚風更溫柔 (維港)", w: ['你', '比', '晚風', '更', '溫柔'], e: ['You are', 'gentle breeze'], q: ['“ 入夜，維港的燈火亮了，', '晚風和你，都剛剛好 ”'] },
+            { name: "【香港】星落在維港的眼裡", w: ['星', '落在', '維港', '的', '眼裡'], e: ['Hong Kong', 'nightfall'], q: ['“ 城市入夜，海浪輕搖，', '所有的故事都在此刻靠岸 ”'] },
+            { name: "【香港】夜比繁華更浪漫", w: ['夜', '比', '繁華', '更', '浪漫'], e: ['City of', 'stars'], q: ['“ 吹過維多利亞港的風，', '帶著一萬種心動的可能 ”'] },
+            { name: "【香港】海風吻過了維港 (小輪)", w: ['海', '風', '吻過', '了', '維港'], e: ['Victoria', 'harbour'], q: ['“ 乘著搖晃的天星小輪，', '把心事都揉碎在夜色裡 ”'] },
+            { name: "【香港】孤獨遇見了繁華 (街頭)", w: ['孤', '獨', '遇見', '了', '繁華'], e: ['Midnight', 'wanderer'], q: ['“ 越是擁擠的街道，', '越適合一個人漫無目的地遊蕩 ”'] },
+            { name: "【香港】叮叮載走了時光 (電車)", w: ['叮', '叮', '載走', '了', '時光'], e: ['Ding ding', 'tram'], q: ['“ 聽著軌道摩擦的聲音，', '彷彿回到了那個黃金年代 ”'] },
+            { name: "【香港】霓虹掩蓋了星光 (賽博)", w: ['霓', '虹', '掩蓋', '了', '星光'], e: ['Cyberpunk', 'dreams'], q: ['“ 迷失在尖沙咀的街頭，', '每一盞霓虹都是未完的夢 ”'] },
+            { name: "【香港】燈火點亮了歸途 (山頂)", w: ['燈', '火', '點亮', '了', '歸途'], e: ['Victoria', 'Peak'], q: ['“ 從太平山頂俯瞰，', '整座城市的燈火為你一人閃爍 ”'] },
+            { name: "【香港】晚霞醉倒在中環 (日落)", w: ['晚', '霞', '醉倒', '在', '中環'], e: ['Sunset', 'lover'], q: ['“ 左手是中環的行色匆匆，', '右手是西環的日落餘暉 ”'] },
+            { name: "【香港】鐘聲迴盪在尖東 (鐘樓)", w: ['鐘', '聲', '迴盪', '在', '尖東'], e: ['Time', 'echoes'], q: ['“ 鐘樓的聲音穿透海風，', '訴說著這座城市的過往 ”'] },
+            { name: "【香港】煙火散落在海面 (遊船)", w: ['煙', '火', '散落', '在', '海面'], e: ['Ocean', 'breeze'], q: ['“ 閃爍的遊船劃破夜空，', '帶走了一整天的疲憊 ”'] },
+            { name: "【香港】城市偷走了睡意 (不夜)", w: ['城', '市', '偷走', '了', '睡意'], e: ['Sleepless', 'town'], q: ['“ 霓虹燈不肯熄滅，', '陪著每一個不想睡的靈魂 ”'] },
+
+            // 全國熱點城市
+            { name: "【上海】黃浦江晚風", w: ['晚', '風', '吹過', '了', '黃浦江'], e: ['Shanghai', 'night'], q: ['“ 外灘的鐘聲響起，', '十里洋場的夢還在繼續 ”'] },
+            { name: "【北京】紫禁城落雪", w: ['大', '雪', '落滿', '了', '紫禁城'], e: ['Beijing', 'snowfall'], q: ['“ 一場大雪過後，', '北京就變成了北平 ”'] },
+            { name: "【杭州】西湖泛起微波", w: ['西', '湖', '泛起', '了', '微波'], e: ['Hangzhou', 'West Lake'], q: ['“ 走在蘇堤的垂柳下，', '江南的溫柔都在這風裡 ”'] },
+            { name: "【成都】煙火薰醉成都", w: ['煙', '火', '薰醉', '了', '成都'], e: ['Chengdu', 'slow life'], q: ['“ 吹一吹錦江的晚風，', '在這座來了就不想走的城市 ”'] },
+            { name: "【重慶】嘉陵江夜色", w: ['夜', '色', '迷醉', '在', '嘉陵江'], e: ['Cyberpunk', 'city'], q: ['“ 迷失在重慶的立交橋，', '遇見了山城的賽博龐克 ”'] },
+            { name: "【廣州】珠江水溫柔", w: ['晚', '風', '吻過', '了', '珠江水'], e: ['Canton', 'Tower'], q: ['“ 喝一盅廣式的早茶，', '看一江珠水映照繁華 ”'] },
+            { name: "【西安】長安城亮花燈", w: ['長', '安', '亮起', '了', '花燈'], e: ['Ancient', 'Chang an'], q: ['“ 晚風吹過明城牆，', '一不小心就回到了大唐 ”'] },
+            { name: "【南京】秦淮河伴夜月", w: ['秦', '淮', '伴著', '這', '夜月'], e: ['Nanjing', 'memories'], q: ['“ 烏衣巷口的夕陽斜，', '金陵城的夜色惹人醉 ”'] },
+            { name: "【武漢】長江橋晚霞", w: ['晚', '霞', '染紅', '了', '長江橋'], e: ['River', 'city'], q: ['“ 長江大橋上的晚風，', '吹散了江城的幾多愁 ”'] },
+            { name: "【廈門】鼓浪嶼聽海浪", w: ['海', '浪', '拍打', '著', '鼓浪嶼'], e: ['Xiamen', 'island'], q: ['“ 走在環島路的晚風裡，', '聽海浪訴說著鷺島的故事 ”'] },
+            { name: "【長沙】橘子洲看煙火", w: ['煙', '火', '照亮', '了', '橘子洲'], e: ['Changsha', 'night'], q: ['“ 走進解放西的夜色裡，', '感受星城的不眠與熱烈 ”'] },
+            { name: "【蘇州】平江路聽評彈", w: ['小', '橋', '遇見', '了', '流水'], e: ['Suzhou', 'Jiangnan'], q: ['“ 聽一曲平江路的評彈，', '做一場姑蘇城外的水鄉夢 ”'] },
+            { name: "【青島】棧橋邊吹海風", w: ['海', '風', '吹過', '了', '棧橋'], e: ['Qingdao', 'seaside'], q: ['“ 喝一袋青島的散裝啤酒，', '把煩惱都丟進這片海裡 ”'] },
+            { name: "【瀋陽】中街飄初雪", w: ['初', '雪', '飄落', '在', '中街上'], e: ['Winter in', 'Shenyang'], q: ['“ 走在飄雪的瀋陽街頭，', '感受這座重工城市的溫柔 ”'] },
+            { name: "【桂林】灕江山水畫", w: ['山', '水', '倒影', '在', '灕江裡'], e: ['Guilin', 'scenery'], q: ['“ 桂林的山水如畫，', '撐一竹筏便入了畫中 ”'] },
+            { name: "【南寧】綠城愜意夜", w: ['微', '風', '吹過', '了', '邕江畔'], e: ['Green', 'city'], q: ['“ 騎著小電驢穿梭在街頭，', '南寧的晚風總是那麼愜意 ”'] },
+            { name: "【深圳】深圳灣星光", w: ['星', '光', '點亮', '了', '深圳灣'], e: ['Shenzhen', 'Bay'], q: ['“ 在這個永不熄燈的城市，', '每個人都在追逐著夢想 ”'] },
+            { name: "【汕頭】南澳島海風", w: ['海', '風', '吹過', '了', '南澳島'], e: ['Seaside', 'town'], q: ['“ 吃一碗地道的牛肉丸，', '吹一吹南澳島的海風 ”'] },
+            { name: "【大理】洱海風花雪", w: ['蒼', '山', '守望', '著', '洱海月'], e: ['Dali', 'romance'], q: ['“ 下關風吹上關花，', '大理的風花雪月都在眼前 ”'] },
+            { name: "【寧夏】騰格里星空", w: ['星', '光', '灑滿', '了', '騰格里'], e: ['Desert', 'stars'], q: ['“ 大漠孤煙直，長河落日圓，', '寧夏的星空浩瀚無垠 ”'] },
+
+            { name: "【空白模板】完全自定義", w: ['字1', '字2', '長單詞', '字4', '長單詞'], e: ['English 1', 'English 2'], q: ['“ 在這裡寫下第一句，', '在這裡寫下第二句 ”'] }
+        ];
+
+        textOptions.forEach((opt, index) => {
+            const optionEl = document.createElement('option');
+            optionEl.value = index;
+            optionEl.textContent = opt.name;
+            templateSelect.appendChild(optionEl);
+        });
+
+        function loadTemplateToInputs(index) {
+            const tmpl = textOptions[index];
+            for(let i=0; i<5; i++) inputs.w[i].value = tmpl.w[i];
+            for(let i=0; i<2; i++) inputs.e[i].value = tmpl.e[i];
+            for(let i=0; i<2; i++) inputs.q[i].value = tmpl.q[i];
+            triggerPreviewRender();
+        }
+
+        function triggerPreviewRender() {
+            if (!currentImage) return;
+            statusBadge.textContent = "流暢預覽中";
+            statusBadge.className = "px-2 py-1 bg-yellow-500 text-black text-xs font-bold rounded-md";
+            drawCanvas(false); 
+        }
+
+        templateSelect.addEventListener('change', (e) => loadTemplateToInputs(e.target.value));
+        [...inputs.w, ...inputs.e, ...inputs.q, inputs.wm].forEach(input => input.addEventListener('input', triggerPreviewRender));
+        Object.values(sliders).forEach(sliderInfo => {
+            sliderInfo.el.addEventListener('input', (e) => {
+                sliderInfo.val.textContent = e.target.value + '%';
+                triggerPreviewRender();
+            });
+        });
+
+        loadTemplateToInputs(0); 
+
+        imageUpload.addEventListener('change', async function(e) {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            emptyState.style.display = 'flex';
+            previewImage.style.display = 'none';
+            btnDownload.disabled = true;
+
+            let displayName = file.name;
+            if(displayName.length > 15) displayName = displayName.substring(0, 15) + '...';
+            
+            loadingOverlay.style.display = 'flex';
+            loadingText.textContent = "載入照片中...";
+
+            try {
+                let objectUrl = "";
+                if (file.name.toLowerCase().endsWith('.heic') || file.type === 'image/heic') {
+                    loadingText.textContent = "解碼 HEIC 原圖中...";
+                    try {
+                        const conversionResult = await heic2any({ blob: file, toType: "image/jpeg", quality: 0.9 });
+                        const blobToUse = Array.isArray(conversionResult) ? conversionResult[0] : conversionResult;
+                        objectUrl = URL.createObjectURL(blobToUse);
+                    } catch (heicError) {
+                        throw new Error("無法解碼此 HEIC，請先轉存為 JPG。");
+                    }
+                } else {
+                    objectUrl = URL.createObjectURL(file);
+                }
+
+                const img = new Image();
+                img.onload = function() {
+                    currentImage = img;
+                    fileNameDisplay.innerHTML = `<span class="text-blue-700 font-bold">已載入: ${displayName}</span>`;
+                    emptyState.style.display = 'none';
+                    btnDownload.disabled = false;
+                    loadingOverlay.style.display = 'none';
+                    triggerPreviewRender();
+                    URL.revokeObjectURL(objectUrl);
+                }
+                img.onerror = () => { alert("圖片載入失敗"); loadingOverlay.style.display = 'none'; }
+                img.src = objectUrl;
+
+            } catch (error) {
+                alert(error.message);
+                loadingOverlay.style.display = 'none';
+            }
+        });
+
+        function drawSpacedText(ctx, text, x, y, letterSpacing) {
+            let currentX = x;
+            for (let i = 0; i < text.length; i++) {
+                ctx.fillText(text[i], currentX, y);
+                currentX += ctx.measureText(text[i]).width + letterSpacing;
+            }
+            return currentX;
+        }
+
+        function drawCanvas(isHD = false) {
+            if (!currentImage) return;
+
+            const MAX_DIM = isHD ? 3000 : 800; 
+            let drawW = currentImage.width;
+            let drawH = currentImage.height;
+            
+            if (drawW > MAX_DIM || drawH > MAX_DIM) {
+                let ratio = Math.min(MAX_DIM / drawW, MAX_DIM / drawH);
+                drawW = drawW * ratio;
+                drawH = drawH * ratio;
+            }
+
+            canvas.width = drawW;
+            canvas.height = drawH;
+            ctx.drawImage(currentImage, 0, 0, drawW, drawH);
+
+            const scaleMultiplier = sliders.size.el.value / 100;
+            const txPercent = sliders.t_x.el.value / 100;
+            const tyPercent = sliders.t_y.el.value / 100;
+            const exPercent = sliders.e_x.el.value / 100; 
+            const eyPercent = sliders.e_y.el.value / 100; 
+            const qxPercent = sliders.q_x.el.value / 100;
+            const qyPercent = sliders.q_y.el.value / 100;
+            const alphaMain = sliders.op_main.el.value / 100;
+            const alphaWm = sliders.op_wm.el.value / 100;
+
+            const baseDimension = Math.min(drawW, drawH); 
+            const baseFontSize = baseDimension * 0.08 * scaleMultiplier; 
+            
+            const fontFamilySerif = '"Noto Serif TC", "PMingLiU", "MingLiU", serif';
+            const fontFamilySans = 'Helvetica, Arial, sans-serif';
+            
+            ctx.textBaseline = 'top';
+            ctx.shadowColor = `rgba(0, 0, 0, ${alphaMain * 0.6})`;
+            ctx.shadowBlur = baseDimension * 0.015;
+            ctx.shadowOffsetX = baseDimension * 0.002;
+            ctx.shadowOffsetY = baseDimension * 0.002;
+            ctx.fillStyle = `rgba(248, 250, 252, ${alphaMain})`; 
+
+            // 1. 主標題 (中文)
+            const words = inputs.w.map(input => input.value);
+            const staggerStyles = [
+                { scale: 1.6, yOffset: 0 }, { scale: 0.9, yOffset: 0.08 },
+                { scale: 1.4, yOffset: 0.04 }, { scale: 0.9, yOffset: 0.10 },
+                { scale: 1.4, yOffset: 0.06 }
+            ];
+
+            let titleBaseX = drawW * txPercent;
+            let titleBaseY = drawH * tyPercent; 
+            let currentX = titleBaseX;
+
+            words.forEach((word, index) => {
+                if(!word) return; 
+                let style = staggerStyles[index];
+                ctx.font = `${style.scale * baseFontSize}px ${fontFamilySerif}`;
+                let y = titleBaseY + (style.yOffset * drawH * scaleMultiplier);
+                let nextX = drawSpacedText(ctx, word, currentX, y, baseDimension * 0.008);
+                currentX = nextX + (baseDimension * 0.03); 
+            });
+
+            // 2. 英文副標
+            let enBaseX = drawW * exPercent;
+            let enBaseY = drawH * eyPercent;
+            ctx.font = `300 ${0.5 * baseFontSize}px ${fontFamilySans}`;
+            if(inputs.e[0].value) drawSpacedText(ctx, inputs.e[0].value, enBaseX, enBaseY, baseDimension * 0.01);
+            if(inputs.e[1].value) drawSpacedText(ctx, inputs.e[1].value, enBaseX + (baseDimension * 0.15), enBaseY + (baseDimension * 0.04), baseDimension * 0.01);
+
+            // 3. 引言
+            let quoteBaseX = drawW * qxPercent;
+            let quoteBaseY = drawH * qyPercent;
+            ctx.font = `${0.45 * baseFontSize}px ${fontFamilySerif}`;
+            if(inputs.q[0].value) drawSpacedText(ctx, inputs.q[0].value, quoteBaseX, quoteBaseY, baseDimension * 0.005);
+            if(inputs.q[1].value) drawSpacedText(ctx, inputs.q[1].value, quoteBaseX, quoteBaseY + (baseDimension * 0.045), baseDimension * 0.005);
+
+            // 4. 浮水印
+            const wmText = inputs.wm.value;
+            if(wmText) {
+                ctx.shadowColor = 'transparent';
+                ctx.fillStyle = `rgba(248, 250, 252, ${alphaWm})`;
+                ctx.font = `600 ${0.35 * baseFontSize}px "Helvetica Neue", Helvetica, Arial, sans-serif`;
+                let wmLetterSpacing = baseDimension * 0.02;
+                let wmWidth = ctx.measureText(wmText).width + (wmText.length * wmLetterSpacing);
+                drawSpacedText(ctx, wmText, (drawW - wmWidth) / 2, drawH * 0.94, wmLetterSpacing);
+            }
+
+            if (!isHD) {
+                previewImage.src = canvas.toDataURL('image/jpeg', 0.6);
+                previewImage.style.display = 'block';
+            }
+        }
+
+        function getCanvasBlob(canvas) {
+            return new Promise((resolve) => {
+                canvas.toBlob((blob) => {
+                    resolve(blob);
+                }, 'image/jpeg', 0.95);
+            });
+        }
+
+        let currentFileToShare = null;
+
+        btnDownload.addEventListener('click', async () => {
+            if (!currentImage) return;
+            
+            loadingOverlay.style.display = 'flex';
+            loadingText.textContent = "正在渲染高清畫質...";
+            
+            setTimeout(async () => {
+                drawCanvas(true);
+                const blob = await getCanvasBlob(canvas);
+                
+                if (hdBlobUrl) URL.revokeObjectURL(hdBlobUrl);
+                
+                hdBlobUrl = URL.createObjectURL(blob);
+                finalHdImage.src = hdBlobUrl;
+                
+                currentFileToShare = new File([blob], "DASEINPRESENT_City.jpg", { type: "image/jpeg" });
+                
+                loadingOverlay.style.display = 'none';
+                resultModal.style.display = 'flex';
+                statusBadge.textContent = "✅ 高清渲染完成";
+                statusBadge.className = "px-2 py-1 bg-green-500 text-white text-xs font-bold rounded-md";
+                
+            }, 50);
+        });
+
+        btnNativeShare.addEventListener('click', async () => {
+            if (navigator.share && navigator.canShare && navigator.canShare({ files: [currentFileToShare] })) {
+                try {
+                    await navigator.share({
+                        files: [currentFileToShare],
+                        title: 'DASEINPRESENT',
+                        text: '我的城市圖文詩集'
+                    });
+                } catch (err) {
+                    console.log("分享視窗關閉或失敗", err);
+                }
+            } else {
+                const a = document.createElement('a');
+                a.href = hdBlobUrl;
+                a.download = 'DASEINPRESENT_City.jpg';
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                alert("已嘗試觸發下載！\n如果沒有成功下載，請直接長按上方的圖片，選擇『儲存圖片』即可。");
+            }
+        });
+
+        btnCloseModal.addEventListener('click', () => {
+            resultModal.style.display = 'none';
+            triggerPreviewRender();
+        });
+
+    </script>
+</body>
+</html>
